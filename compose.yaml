@@ -1,0 +1,95 @@
+# Postgres + pgAdmin for Node3.
+#
+# PGDATA lives on a local Docker volume, NOT on the NAS. Postgres needs
+# reliable fsync and file locking, which NFS does not dependably provide.
+# The NAS is bind-mounted read-write at /backup purely for dumps.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      # Keep the cluster in a subdirectory so the volume root (lost+found etc.)
+      # never confuses initdb.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - type: bind
+        source: ${PGBACKUP_PATH:?PGBACKUP_PATH is required}
+        target: /backup
+        bind:
+          # Fail loudly if the NAS is not mounted. Without this Docker would
+          # silently create an empty local directory and "backups" would go to
+          # the node's own disk.
+          create_host_path: false
+    # Bound to the node's LAN address, not 0.0.0.0.
+    ports:
+      - "${POSTGRES_BIND:-127.0.0.1}:5432:5432"
+    shm_size: 256mb
+    stop_grace_period: 1m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - db
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:?PGADMIN_EMAIL is required}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?PGADMIN_PASSWORD is required}
+      PGADMIN_CONFIG_SERVER_MODE: "True"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGADMIN_DISABLE_POSTFIX: "True"
+    volumes:
+      - pgadmin:/var/lib/pgadmin
+    ports:
+      - "${PGADMIN_BIND:-127.0.0.1}:5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - db
+
+  # One-off backup job. "profiles" keeps it out of normal deploys -- it only
+  # runs when invoked, via Komodo's RunStackService (see the "Postgres Backup"
+  # procedure in resources/procedures/).
+  backup:
+    image: postgres:17-alpine
+    profiles: ["backup"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - ./backup.sh:/usr/local/bin/backup.sh:ro
+      - type: bind
+        source: ${PGBACKUP_PATH:?PGBACKUP_PATH is required}
+        target: /backup
+        bind:
+          create_host_path: false
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh"]
+    networks:
+      - db
+
+volumes:
+  pgdata:
+  pgadmin:
+
+networks:
+  db:
+    name: ${DB_NETWORK:-db}
