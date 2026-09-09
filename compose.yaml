@@ -3,10 +3,23 @@
 # PGDATA lives on a local Docker volume, NOT on the NAS. Postgres needs
 # reliable fsync and file locking, which NFS does not dependably provide.
 # The NAS is bind-mounted read-write at /backup purely for dumps.
+#
+# POSTGRES_IMAGE swaps the whole server, e.g. to a PostGIS build. Two rules if
+# you change it on a cluster that already has data:
+#
+#   1. Keep the SAME libc. Collation ordering comes from the C library, so
+#      moving between a musl (alpine) and a glibc (debian) image under an
+#      existing PGDATA can silently corrupt every text btree index. Postgis
+#      publishes an -alpine variant precisely so this swap is a no-op:
+#      postgis/postgis:17-3.5-alpine is postgres:17-alpine plus PostGIS.
+#   2. Keep the SAME major version, and do not go backwards on the minor.
+#
+# The backup job deliberately uses the same image so pg_dumpall always matches
+# the server it is dumping.
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
     container_name: postgres
     restart: unless-stopped
     environment:
@@ -64,7 +77,7 @@ services:
   # runs when invoked, via Komodo's RunStackService (see the "Postgres Backup"
   # procedure in resources/procedures/).
   backup:
-    image: postgres:17-alpine
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
     profiles: ["backup"]
     restart: "no"
     depends_on:
