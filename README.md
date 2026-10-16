@@ -31,6 +31,7 @@ real block device with its own filesystem and correct POSIX semantics.
 | `postgres` | `postgres:17-alpine` | 5432 | the database |
 | `pgadmin` | `dpage/pgadmin4` | 5050 → 80 | web admin UI |
 | `backup` | `postgres:17-alpine` | — | one-off dump job (compose profile `backup`) |
+| `provision` | `postgres:17-alpine` | — | idempotent app role/db setup (compose profile `provision`) |
 
 `backup` sits behind a compose profile, so it never starts on a normal deploy.
 
@@ -56,6 +57,23 @@ The backup job refuses to run without it — see below.
 Both ports default to `127.0.0.1`. Set `POSTGRES_BIND` / `PGADMIN_BIND` to a
 LAN address to reach them from other hosts. Avoid `0.0.0.0` unless you really
 mean to offer a database to every interface.
+
+---
+
+## Provisioning app databases
+
+The `provision` service (compose profile `provision`) creates a role, an owned
+database, and optional extensions for each app, idempotently:
+
+```
+COMPOSE_PROFILES=provision
+DB_PROVISION=formbricks:<hex>:vector,kaneo:<hex>
+```
+
+With the profile enabled it runs after `postgres` is healthy on every deploy;
+re-runs reset passwords to the given values and never drop anything.
+Extensions are created as superuser, so apps don't need superuser rights for
+e.g. pgvector. Use hex passwords (no `:` or `,`).
 
 ---
 
@@ -106,4 +124,5 @@ Test a restore into a throwaway database before you need it for real.
 | --- | --- |
 | `compose.yaml` | the stack definition |
 | `backup.sh` | dump, verify, prune |
+| `provision.sh` | create app roles, databases, extensions |
 | `.env.example` | template for `.env` |

@@ -99,6 +99,27 @@ services:
     networks:
       - db
 
+  # Run-once provisioning of app roles/databases/extensions (see provision.sh).
+  # Behind a profile so plain deploys are unchanged; enable it with
+  # COMPOSE_PROFILES=provision to run it on every deploy (it is idempotent).
+  provision:
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    profiles: ["provision"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      DB_PROVISION: ${DB_PROVISION:-}
+    volumes:
+      - ./provision.sh:/usr/local/bin/provision.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/provision.sh"]
+    networks:
+      - db
+
 volumes:
   pgdata:
   pgadmin:
