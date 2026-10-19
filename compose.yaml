@@ -95,7 +95,13 @@ services:
         target: /backup
         bind:
           create_host_path: false
-    entrypoint: ["/bin/sh", "/usr/local/bin/backup.sh"]
+    # backup.sh needs `set -o pipefail`: busybox sh (alpine images) has it,
+    # dash (/bin/sh on debian images such as pgvector/pgvector) does not, so
+    # prefer bash when the image ships it.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'if command -v bash >/dev/null 2>&1; then exec bash /usr/local/bin/backup.sh; else exec sh /usr/local/bin/backup.sh; fi'
     networks:
       - db
 
